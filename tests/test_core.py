@@ -21,9 +21,8 @@ class MockAsyncClient:
     def __init__(self, response):
         self.response = response
 
-    @asyncio.coroutine
-    def send(self, req):
-        yield from asyncio.sleep(0)
+    async def send(self, req):
+        await asyncio.sleep(0)
         self.request = req
         return self.response
 
@@ -60,9 +59,8 @@ def test_exec():
 
 def test_exec_async(loop):
 
-    @asyncio.coroutine
-    def sender(req):
-        yield from asyncio.sleep(0)
+    async def sender(req):
+        await asyncio.sleep(0)
         if not req.endswith('/'):
             return 'redirect:' + req + '/'
         elif req == '/posts/latest/':
@@ -391,13 +389,9 @@ def test_aiohttp_send(loop):
                     headers={'Accept': 'application/json'})
     aiohttp = pytest.importorskip('aiohttp')
 
-    @asyncio.coroutine
-    def do_test():
-        session = aiohttp.ClientSession()
-        try:
-            return (yield from snug.send_async(session, req))
-        finally:
-            yield from session.close()
+    async def do_test():
+        async with aiohttp.ClientSession() as session:
+            return await snug.send_async(session, req)
 
     response = loop.run_until_complete(do_test())
     assert response == snug.Response(200, mock.ANY, headers=mock.ANY)

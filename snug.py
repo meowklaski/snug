@@ -42,14 +42,11 @@ __description__ = 'Write reusable web API interactions'
 T = t.TypeVar('T')
 T_auth = t.TypeVar('T_auth')
 _TextMapping = t.Mapping[str, str]
-_Awaitable = (t.Awaitable.__getitem__  # pragma: no cover
-              if sys.version_info > (3, 5)
-              else lambda x: t.Generator[t.Any, t.Any, x])
 _ASYNCIO_USER_AGENT = 'Python-asyncio/3.{}'.format(sys.version_info.minor)
 _Sender = t.Callable[['Request'], 'Response']
-_AsyncSender = t.Callable[['Request'], _Awaitable('Response')]
+_AsyncSender = t.Callable[['Request'], t.Awaitable['Response']]
 _Executor = t.Callable[['Query[T]'], T]
-_AExecutor = t.Callable[['Query[T]'], _Awaitable(T)]
+_AExecutor = t.Callable[['Query[T]'], t.Awaitable[T]]
 _AuthMethod = t.Callable[[T_auth, 'Request'], 'Request']
 
 
@@ -125,8 +122,7 @@ class Request:
         headers
             the headers to add
         """
-        merged = dict(chain(self.headers.items(), headers.items()))
-        return self.replace(headers=merged)
+        return self.replace(headers={**self.headers, **headers})
 
     def with_prefix(self, prefix: str) -> 'Request':
         """Create a new request with added url prefix
@@ -146,8 +142,7 @@ class Request:
         params
             the parameters to add
         """
-        merged = dict(chain(self.params.items(), params.items()))
-        return self.replace(params=merged)
+        return self.replace(params={**self.params, **params})
 
     def _asdict(self):
         return {a: getattr(self, a) for a in self.__slots__}
@@ -172,9 +167,7 @@ class Request:
         **kwargs
             fields and values to replace
         """
-        attrs = self._asdict()
-        attrs.update(kwargs)
-        return Request(**attrs)
+        return Request(**{**self._asdict(), **kwargs})
 
     def __repr__(self):
         return ('<Request: {0.method} {0.url}, params={0.params!r}, '
@@ -229,9 +222,7 @@ class Response:
         **kwargs
             fields and values to replace
         """
-        attrs = self._asdict()
-        attrs.update(kwargs)
-        return Response(**attrs)
+        return Response(**{**self._asdict(), **kwargs})
 
 
 class Query(t.Generic[T], t.Iterable[Request]):
@@ -335,8 +326,7 @@ class _SocketAdaptor:
         return self._file
 
 
-@asyncio.coroutine
-def _asyncio_sender(req: Request) -> _Awaitable(Response):
+async def _asyncio_sender(req: Request) -> Response:
     """A rudimentary HTTP client using :mod:`asyncio`"""
     if not any(h.lower() == 'user-agent' for h in req.headers):
         req = req.with_headers({'User-Agent': _ASYNCIO_USER_AGENT})
@@ -346,7 +336,7 @@ def _asyncio_sender(req: Request) -> _Awaitable(Response):
         connect = asyncio.open_connection(url.hostname, 443, ssl=True)
     else:
         connect = asyncio.open_connection(url.hostname, 80)
-    reader, writer = yield from connect
+    reader, writer = await connect
     try:
         headers = '\r\n'.join([
             '{} {} HTTP/1.1'.format(req.method, url.path + '?' + url.query),
@@ -356,7 +346,7 @@ def _asyncio_sender(req: Request) -> _Awaitable(Response):
             '\r\n'.join(starmap('{}: {}'.format, req.headers.items())),
         ])
         writer.write(b'\r\n'.join([headers.encode(), b'', req.content or b'']))
-        response_bytes = BytesIO((yield from reader.read()))
+        response_bytes = BytesIO((await reader.read()))
     finally:
         writer.close()
     raw_response = HTTPResponse(_SocketAdaptor(response_bytes))
@@ -385,12 +375,11 @@ def _exec(query, sender):
             return e.value
 
 
-@asyncio.coroutine
-def _exec_async(query, sender):
+async def _exec_async(query, sender):
     gen = iter(query)
     request = next(gen)
     while True:
-        response = yield from sender(request)
+        response = await sender(request)
         try:
             request = gen.send(response)
         except StopIteration as e:
@@ -426,7 +415,7 @@ def execute(query: Query[T], *,
 def execute_async(query: Query[T], *,
                   auth: T_auth=None,
                   client=None,
-                  auth_method: _AuthMethod=basic_auth) -> _Awaitable(T):
+                  auth_method: _AuthMethod=basic_auth) -> t.Awaitable[T]:
     """Execute a query asynchronously, returning its result
 
     Parameters
@@ -484,8 +473,7 @@ def send(client, request: Request) -> Response:
 
 
 @singledispatch
-@asyncio.coroutine
-def send_async(client, request: Request) -> _Awaitable(Response):
+async def send_async(client, request: Request) -> Response:
     """Given a client, send a :class:`Request`,
     returning an awaitable :class:`Response`.
 
@@ -561,24 +549,17 @@ except ImportError:  # pragma: no cover
     pass
 else:
     @send_async.register(aiohttp.ClientSession)
-    @asyncio.coroutine
-    def _aiohttp_send(session, req: Request) -> _Awaitable(Response):
+    async def _aiohttp_send(session, req: Request) -> Response:
         """send a request with the `aiohttp` library"""
-        response = yield from session.request(req.method, req.url,
-                                              params=req.params,
-                                              data=req.content,
-                                              headers=req.headers)
-        try:
+        async with session.request(req.method, req.url,
+                                   params=req.params,
+                                   data=req.content,
+                                   headers=req.headers) as resp:
             return Response(
-                response.status,
-                content=(yield from response.read()),
-                headers=response.headers,
+                resp.status,
+                content=await resp.read(),
+                headers=resp.headers,
             )
-        except Exception:  # pragma: no cover
-            response.close()
-            raise
-        finally:
-            yield from response.release()
 
 
 try:
