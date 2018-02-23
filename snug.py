@@ -8,7 +8,7 @@ from collections import Mapping
 from functools import partial, singledispatch
 from http.client import HTTPResponse
 from io import BytesIO
-from itertools import chain, starmap
+from itertools import starmap
 from operator import methodcaller
 from types import MethodType
 
