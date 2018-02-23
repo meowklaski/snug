@@ -34,7 +34,7 @@ __all__ = [
     'OPTIONS',
 ]
 
-__version__ = '1.0.2'
+__version__ = '1.1.0'
 __author__ = 'Arie Bovenberg'
 __copyright__ = '2018, Arie Bovenberg'
 __description__ = 'Write reusable web API interactions'
